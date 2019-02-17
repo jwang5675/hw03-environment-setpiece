@@ -338,52 +338,192 @@ vec3 getWaterNormal(vec2 p, float distToWater) {
 }
 
 /********************************************** Start Code for SDFs **********************************************/
+struct Cube {
+    vec3 min;
+    vec3 max;
+};
+
+// Adapted from 460 slides
+float rayCubeIntersect(Cube c, vec3 ray_origin, vec3 ray_dir) {
+    float tnear = -1000.0;
+    float tfar = 1000.0;
+    for (int i = 0; i < 3; i++) {
+        if (ray_dir[i] == 0.0) {
+            if (ray_origin[i] < c.min[i] || ray_origin[i] > c.max[i]) {
+                return 1000.0;
+            }
+        }
+        float t0 = (c.min[i] - ray_origin[i]) / ray_dir[i];
+        float t1 = (c.max[i] - ray_origin[i]) / ray_dir[i];
+        if (t0 > t1) {
+            float temp = t0;
+            t0 = t1;
+            t1 = temp;
+        }
+        tnear = max(t0, tnear);
+        tfar = min(t1, tfar);
+    }
+    if (tnear > tfar) {
+        return 1000.0;
+    }
+    return tnear;
+}
+
+mat4 rotationMatrix(vec3 axis, float angle) {
+    axis = normalize(axis);
+    float s = sin(angle);
+    float c = cos(angle);
+    float oc = 1.0 - c;
+    
+    return mat4(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,  0.0,
+                oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,  0.0,
+                oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c,           0.0,
+                0.0,                                0.0,                                0.0,                                1.0);
+}
+
+// Primitive SDFs from IQ
+float opSubtraction(float d1, float d2) {
+    return max(-d1, d2);
+}
+
+float opUnion(float d1, float d2) {
+    return min(d1, d2); 
+}
+
+float sdSphere(vec3 p, float s) {
+    return length(p) - s;
+}
+
+float sdCylinder(vec3 p, vec3 c) {
+    return length(p.xy - c.xy) - c.z;
+}
+
+float sdVerticalCapsule(vec3 p, float h, float r) {
+    p.y -= clamp(p.y, 0.0, h);
+    return length(p) - r;
+}
+
+float sdHorizontalCapsule(vec3 p, float h, float r) {
+    p.z -= clamp(p.z, 0.0, h);
+    return length(p) - r;
+}
 
 float sdBox(vec3 p, vec3 b) {
-  vec3 d = abs(p) - b;
-  return length(max(d, 0.0)) + min(max(d.x, max(d.y, d.z)), 0.0);
+    vec3 d = abs(p) - b;
+    return length(max(d,0.0)) + min(max(d.x,max(d.y,d.z)),0.0);
 }
 
-float opCheapBend(vec3 p ) {
-    float k = 10.0;
-    float c = cos(k * p.x);
-    float s = sin(k * p.x);
-    mat2  m = mat2(c,-s, s, c);
-    vec3  q = vec3(m * p.xy, p.z);
-    return sdBox(q, vec3(1, 1, 1));
+float dot2( in vec3 v ) { return dot(v,v); }
+
+float udTriangle( vec3 p, vec3 a, vec3 b, vec3 c ) {
+    vec3 ba = b - a; vec3 pa = p - a;
+    vec3 cb = c - b; vec3 pb = p - b;
+    vec3 ac = a - c; vec3 pc = p - c;
+    vec3 nor = cross( ba, ac );
+
+    return sqrt(
+    (sign(dot(cross(ba,nor),pa)) +
+     sign(dot(cross(cb,nor),pb)) +
+     sign(dot(cross(ac,nor),pc))<2.0)
+     ?
+     min( min(
+     dot2(ba*clamp(dot(ba,pa)/dot2(ba),0.0,1.0)-pa),
+     dot2(cb*clamp(dot(cb,pb)/dot2(cb),0.0,1.0)-pb) ),
+     dot2(ac*clamp(dot(ac,pc)/dot2(ac),0.0,1.0)-pc) )
+     :
+     dot(nor,pa)*dot(nor,pa)/dot2(nor) );
 }
 
-float sceneSdf(vec3 point) {
-    return sdBox(point, vec3(1, 1, 1));
+float sdBoatBaseShape(vec3 p) {
+    // Make symmetric over x-axis
+    vec3 point = p;
+    point.x = abs(point.x);
+    
+    // Create initial base of boat out of sphere sdf
+    float sdfVal = sdSphere(point.xyz - vec3(-4, 3, 0), 6.0);
+    
+    // Remove a large cylinder over the top portion of the sphere
+    // Such that only the bottom arc of the sphere remains
+    float cylinder = sdCylinder(point, vec3(0.5, 15, 14.5));
+    sdfVal = opSubtraction(cylinder, sdfVal);
+    
+    // Remove a portion of the bottom sphere arc to make the boat bottom flat
+    float bottomCut = p.y + 0.5;
+    sdfVal = opSubtraction(bottomCut, sdfVal);
+    
+    return sdfVal;
+}
+
+float sdBoatBase(vec3 p) {
+    // Cuts the boat shape by another raised boat shape to make the boat have an inner portion
+    return opSubtraction(sdBoatBaseShape(p), sdBoatBaseShape(vec3(p.x, p.y + 0.2, p.z)));
+}
+
+float sdBoatSail(vec3 p) {
+    float longBase = sdVerticalCapsule(p, 7.0, 0.1);
+    float shortBase = sdVerticalCapsule(p, 1.5, 0.2);
+    float base = opUnion(longBase, shortBase);
+
+    vec3 handlePoint = vec3(p.x, p.y - 2.4, p.z);
+    float handleBrace = sdVerticalCapsule(handlePoint, 0.2, 0.17);
+    handlePoint = vec3(p.x, p.y - 2.5, p.z);
+    float handleArm = sdHorizontalCapsule(handlePoint, 4.0, 0.1);
+    float handle = opUnion(handleBrace, handleArm);
+
+    float sail = udTriangle(handlePoint, vec3(0, 0, 0), vec3(0, 5, 0), vec3(0, 0, 5));
+
+    return opUnion(opUnion(base, handle), sail);
+}
+
+float sdBoat(vec3 p) {
+    vec3 sailPoint = vec3(p.x, p.y + 0.5, p.z + 0.8);
+    return opUnion(sdBoatBase(p), sdBoatSail(sailPoint));
+}
+
+float sceneSdf(vec3 p) {
+    return sdBoat(p);
+}
+
+vec3 sdfNormal(vec3 p) {
+    float epsilon = 0.1;
+    return normalize(vec3(
+        sceneSdf(vec3(p.x + epsilon, p.y, p.z)) - sceneSdf(vec3(p.x - epsilon, p.y, p.z)),
+        sceneSdf(vec3(p.x, p.y + epsilon, p.z)) - sceneSdf(vec3(p.x, p.y - epsilon, p.z)),
+        sceneSdf(vec3(p.x, p.y, p.z + epsilon)) - sceneSdf(vec3(p.x, p.y, p.z - epsilon))
+    ));
+}
+
+vec3 lambert(vec3 p, vec3 color) {
+    vec3 light_pos = vec3(0, 15, -10);
+    vec3 direction = light_pos - p;
+    vec3 normal = sdfNormal(p);
+
+    float diffuseTerm = dot(normalize(normal), normalize(direction));
+    diffuseTerm = clamp(diffuseTerm, 0.0, 1.0);
+    float ambientTerm = 0.2;
+
+    float lightIntensity = diffuseTerm + ambientTerm;
+    return clamp(vec3(color.rgb * lightIntensity), 0.0, 1.0);
 }
 
 vec3 rayMarch(vec3 origin, vec3 direction) {
-    vec3 color = vec3(1, 1, 1);
-    float dist = 0.0;
-    float stepSize = sceneSdf(origin);
+    Cube boundingBox;
+    boundingBox.min = vec3(-5, -1, -5);
+    boundingBox.max = vec3(5, 8, 5);
+    float t = rayCubeIntersect(boundingBox, origin, direction);
 
-    // Sphere Marching for SDFs
-    for(int i = 0; i < 50; i++) {
-        dist = dist + stepSize;
+    while (t < 100.0) {
+        vec3 point = origin + t * direction;
 
-        // Travel at most 50 units away
-        if (dist > 50.0) {
-            return color;
-        }
-        vec3 point = origin + dist * direction;
-        float sdfDistance = sceneSdf(point);
-
-        if (sdfDistance < 0.0025) {
-            // We hit something, return the color of the object hit
-            color = vec3(1.0, 0.0, 0.0);
-            break;
+        float distance = sceneSdf(point);
+        if (distance < 0.01) {
+            return lambert(point, vec3(1, 0, 0));
         }
 
-        // Travel at least with a dt of 0.1
-        stepSize = max(stepSize, 0.0025);
+        t = t + 0.05;
     }
 
-    return color;
+    return vec3(0, 0, 0);
 }
 
 /********************************************** Start Code for Main **********************************************/
@@ -398,10 +538,10 @@ void main() {
 	vec3 worldPoint = u_Ref + fs_Pos.x * h + fs_Pos.y * v;
 	vec3 rayDir = normalize(worldPoint - u_Eye);
 
-    vec3 color;
+    vec3 color;  
 
-    // Draw water and sky
-	float waterDist = planeIntersect(u_Eye, rayDir, vec4(0, 1, 0, 10));
+    //Draw water and sky
+	float waterDist = planeIntersect(u_Eye, rayDir, vec4(0, 1, 0, 0));
 	if (waterDist > 0.0) {
 		vec3 point = u_Eye + waterDist * rayDir;
 		vec3 normal = getWaterNormal(point.xz, waterDist);
@@ -413,5 +553,10 @@ void main() {
     	color = skyBox(farClip, rayDir);
 	}
 
-     out_Col = vec4(color, 1);
+    vec3 sdfColor = rayMarch(u_Eye, rayDir); 
+    if (sdfColor != vec3(0, 0, 0)) {
+        color = sdfColor;
+    }
+
+    out_Col = vec4(color, 1);
 }
