@@ -2,7 +2,7 @@
 
 Motivation: 
 
-![](images/motivation.png)
+![](images/motivation.jpg)
 
 https://jwang5675.github.io/hw03-environment-setpiece/
 
