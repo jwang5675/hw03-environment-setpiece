@@ -312,32 +312,8 @@ vec3 skyBox(vec3 p, vec3 rayDir) {
     return ret;
 }
 
-/********************************************** Start Code for Water **********************************************/
-
-// p describes the plane normal = p.xyz and intersect = p.y
-float planeIntersect(vec3 ro, vec3 rd, vec4 p){
-    return -(dot(ro, p.xyz) + p.w) / dot(rd, p.xyz);
-}
-
-float waterFbm(vec2 p) {
-	vec2 rotatePos = p * mat2(0.60, -0.80, 0.80, 0.60);
-	return 0.1 * abs(fbm3(vec3(rotatePos, 0.001 * u_Time)));
-}
-
-vec3 getWaterNormal(vec2 p, float distToWater) {
-	// make water less noise the futher away it is
-	float offset = -10.0 * (1.0 - smoothstep(0.0, 1000.0, distToWater));
-	vec2 dx = vec2(0.1, 0.0);
-	vec2 dz = vec2(0.0, 0.1);
-	vec2 point = p / 50.0;
-
-	vec3 normal = vec3(0.0, 1.0, 0.0);
-	normal.x = offset * (waterFbm(point + dx) - waterFbm(point - dx));
-	normal.z = offset * (waterFbm(point + dz) - waterFbm(point - dz));
-	return normalize(normal);
-}
-
 /********************************************** Start Code for SDFs **********************************************/
+
 struct Cube {
     vec3 min;
     vec3 max;
@@ -369,10 +345,10 @@ float rayCubeIntersect(Cube c, vec3 ray_origin, vec3 ray_dir) {
     return tnear;
 }
 
-mat4 rotationMatrix(vec3 axis, float angle) {
+mat4 rotationMatrix(vec3 axis, float radian) {
     axis = normalize(axis);
-    float s = sin(angle);
-    float c = cos(angle);
+    float s = sin(radian);
+    float c = cos(radian);
     float oc = 1.0 - c;
     
     return mat4(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,  0.0,
@@ -410,28 +386,25 @@ float sdHorizontalCapsule(vec3 p, float h, float r) {
 
 float sdBox(vec3 p, vec3 b) {
     vec3 d = abs(p) - b;
-    return length(max(d,0.0)) + min(max(d.x,max(d.y,d.z)),0.0);
+    return length(max(d, 0.0)) + min(max(d.x, max(d.y, d.z)), 0.0);
 }
 
-float dot2( in vec3 v ) { return dot(v,v); }
+float sdQuarterEllipsoid1(vec3 p, vec3 r) {
+    if (p.z < 0.0 || p.y < 0.0) {
+        return 0.1;
+    }
+    float k0 = length(p / r);
+    float k1 = length(p / (r * r));
+    return k0 * (k0 - 1.0) / k1;
+}
 
-float udTriangle( vec3 p, vec3 a, vec3 b, vec3 c ) {
-    vec3 ba = b - a; vec3 pa = p - a;
-    vec3 cb = c - b; vec3 pb = p - b;
-    vec3 ac = a - c; vec3 pc = p - c;
-    vec3 nor = cross( ba, ac );
-
-    return sqrt(
-    (sign(dot(cross(ba,nor),pa)) +
-     sign(dot(cross(cb,nor),pb)) +
-     sign(dot(cross(ac,nor),pc))<2.0)
-     ?
-     min( min(
-     dot2(ba*clamp(dot(ba,pa)/dot2(ba),0.0,1.0)-pa),
-     dot2(cb*clamp(dot(cb,pb)/dot2(cb),0.0,1.0)-pb) ),
-     dot2(ac*clamp(dot(ac,pc)/dot2(ac),0.0,1.0)-pc) )
-     :
-     dot(nor,pa)*dot(nor,pa)/dot2(nor) );
+float sdQuarterEllipsoid2(vec3 p, vec3 r) {
+    if (p.z > 0.0 || p.y < 0.0) {
+        return 0.1;
+    }
+    float k0 = length(p / r);
+    float k1 = length(p / (r * r));
+    return k0 * (k0 - 1.0) / k1;
 }
 
 float sdBoatBaseShape(vec3 p) {
@@ -460,17 +433,18 @@ float sdBoatBase(vec3 p) {
 }
 
 float sdBoatSail(vec3 p) {
-    float longBase = sdVerticalCapsule(p, 7.0, 0.1);
+    float longBase = sdVerticalCapsule(p, 10.0, 0.1);
     float shortBase = sdVerticalCapsule(p, 1.5, 0.2);
     float base = opUnion(longBase, shortBase);
 
-    vec3 handlePoint = vec3(p.x, p.y - 2.4, p.z);
+    vec3 handlePoint = vec3(p.x, p.y - 1.9, p.z);
     float handleBrace = sdVerticalCapsule(handlePoint, 0.2, 0.17);
-    handlePoint = vec3(p.x, p.y - 2.5, p.z);
+    handlePoint = vec3(p.x, p.y - 2.0, p.z);
     float handleArm = sdHorizontalCapsule(handlePoint, 4.0, 0.1);
     float handle = opUnion(handleBrace, handleArm);
 
-    float sail = udTriangle(handlePoint, vec3(0, 0, 0), vec3(0, 5, 0), vec3(0, 0, 5));
+    float sail = sdQuarterEllipsoid1(handlePoint, vec3(0.1, 8, 4));
+    sail = opUnion(sail, sdQuarterEllipsoid2(handlePoint + vec3(0, 1, 0.5), vec3(0.05, 7, 2)));
 
     return opUnion(opUnion(base, handle), sail);
 }
@@ -506,24 +480,49 @@ vec3 lambert(vec3 p, vec3 color) {
     return clamp(vec3(color.rgb * lightIntensity), 0.0, 1.0);
 }
 
-vec3 rayMarch(vec3 origin, vec3 direction) {
+bool rayMarch(vec3 origin, vec3 direction, inout vec3 color) {
     Cube boundingBox;
     boundingBox.min = vec3(-5, -1, -5);
-    boundingBox.max = vec3(5, 8, 5);
+    boundingBox.max = vec3(5, 11, 5);
     float t = rayCubeIntersect(boundingBox, origin, direction);
 
     while (t < 100.0) {
-        vec3 point = origin + t * direction;
+        vec3 point = vec3(rotationMatrix(vec3(0, 1, 0), PI) * vec4(origin + t * direction, 1.0));
 
         float distance = sceneSdf(point);
         if (distance < 0.01) {
-            return lambert(point, vec3(1, 0, 0));
+            color = lambert(point, vec3(1, 0, 0));
+            return true;
         }
 
         t = t + 0.05;
     }
 
-    return vec3(0, 0, 0);
+    return false;
+}
+
+/********************************************** Start Code for Water **********************************************/
+
+// p describes the plane normal = p.xyz and intersect = p.y
+float planeIntersect(vec3 ro, vec3 rd, vec4 p){
+    return -(dot(ro, p.xyz) + p.w) / dot(rd, p.xyz);
+}
+
+float waterFbm(vec2 p) {
+	return 0.1 * abs(fbm3(vec3(p, 0.001 * u_Time)) - 0.5);
+}
+
+vec3 getWaterNormal(vec2 p, float distToWater) {
+	// make water less noise the futher away it is
+	float offset = -10.0 * (1.0 - smoothstep(0.0, 100.0, distToWater));
+	vec2 dx = vec2(0.1, 0.0);
+	vec2 dz = vec2(0.0, 0.1);
+	vec2 point = p / 5.0;
+
+	vec3 normal = vec3(0.0, 1.0, 0.0);
+	normal.x = offset * (waterFbm(point + dx) - waterFbm(point - dx));
+	normal.z = offset * (waterFbm(point + dz) - waterFbm(point - dz));
+	return normalize(normal);
 }
 
 /********************************************** Start Code for Main **********************************************/
@@ -540,23 +539,36 @@ void main() {
 
     vec3 color;  
 
-    //Draw water and sky
+    // Draw water and sky
 	float waterDist = planeIntersect(u_Eye, rayDir, vec4(0, 1, 0, 0));
 	if (waterDist > 0.0) {
+        // Draws the water
 		vec3 point = u_Eye + waterDist * rayDir;
-		vec3 normal = getWaterNormal(point.xz, waterDist);
-		vec3 reflection = reflect(rayDir, normal);
-        vec3 farClip = point + 1000.0 * normal;
-		color = skyBox(farClip, reflection);
+        vec3 normal = getWaterNormal(point.xz, waterDist);
+        vec3 reflection = reflect(rayDir, normal);
+
+        vec3 waterColor = vec3(0.7, 0.7, 1.0);
+
+        // Find the color of the water reflection
+        vec3 scanPoint = vec3(point.x, point.y - 2.0, point.z);
+        if (!rayMarch(scanPoint, reflection, color)) {
+            // Did not hit sceneSDF, reflects the sky
+		    vec3 farClip = point + 1000.0 * reflection;
+            color = skyBox(farClip, reflection);
+        }
+
+        // Accumulates the water refleciton color 
+        color = waterColor * color;
+
+        // Adds shadow
+
 	} else {
+        // Draws the sky
         vec3 farClip = u_Eye + 1000.0 * rayDir;
     	color = skyBox(farClip, rayDir);
 	}
 
-    vec3 sdfColor = rayMarch(u_Eye, rayDir); 
-    if (sdfColor != vec3(0, 0, 0)) {
-        color = sdfColor;
-    }
+    rayMarch(u_Eye, rayDir, color); 
 
     out_Col = vec4(color, 1);
 }
