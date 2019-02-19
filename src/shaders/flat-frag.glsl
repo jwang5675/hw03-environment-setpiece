@@ -391,20 +391,22 @@ float sdBox(vec3 p, vec3 b) {
 
 float sdQuarterEllipsoid1(vec3 p, vec3 r) {
     if (p.z < 0.0 || p.y < 0.0) {
-        return 0.1;
+        return 1.0;
     }
     float k0 = length(p / r);
     float k1 = length(p / (r * r));
-    return k0 * (k0 - 1.0) / k1;
+    float value = k0 * (k0 - 1.0) / k1;
+    return value;
 }
 
 float sdQuarterEllipsoid2(vec3 p, vec3 r) {
     if (p.z > 0.0 || p.y < 0.0) {
-        return 0.1;
+        return 1.0;
     }
     float k0 = length(p / r);
     float k1 = length(p / (r * r));
-    return k0 * (k0 - 1.0) / k1;
+    float value = k0 * (k0 - 1.0) / k1;
+    return value;
 }
 
 float sdBoatBaseShape(vec3 p) {
@@ -455,10 +457,11 @@ float sdBoat(vec3 p) {
 }
 
 float sceneSdf(vec3 p) {
-    return sdBoat(p);
+    vec3 point = vec3(rotationMatrix(vec3(0, 1, 0), PI) * vec4(p, 1.0)) + vec3(0, -0.7, 0);
+    return sdBoat(point);
 }
 
-vec3 sdfNormal(vec3 p) {
+vec3 sceneNormal(vec3 p) {
     float epsilon = 0.1;
     return normalize(vec3(
         sceneSdf(vec3(p.x + epsilon, p.y, p.z)) - sceneSdf(vec3(p.x - epsilon, p.y, p.z)),
@@ -467,17 +470,45 @@ vec3 sdfNormal(vec3 p) {
     ));
 }
 
-vec3 lambert(vec3 p, vec3 color) {
-    vec3 light_pos = vec3(0, 15, -10);
+float softShadow(vec3 origin, vec3 dir, float min_t, float k) {
+    float res = 1.0;
+    float t = min_t;
+    for(int i = 0; i < 10; ++i) {
+        float m = sceneSdf(origin + t * dir);
+        if(m < 0.0001) {
+            return 0.0;
+        }
+        res = min(res, k * m / t);
+        t += m;
+    }
+    return res;
+}
+
+float shadow(vec3 p) {
+    vec3 sun_dir = normalize(vec3(0.0, cos(u_Time / 175.0), sin(u_Time / 175.0)));
+    vec3 sun_pos = 100.0 * sun_dir; 
+    float sunShadow = clamp(softShadow(p, normalize(sun_pos - p), 0.1, 6.0), 0.0, 1.0);
+
+    vec3 moon_dir = normalize(vec3(0.0, cos(u_Time / 175.0 + PI), sin(u_Time / 175.0 + PI)));
+    vec3 moon_pos = 100.0 * moon_dir; 
+    float moonShadow = clamp(softShadow(p, normalize(moon_pos - p), 0.1, 6.0), 0.0, 1.0);
+
+    return 0.5 * sunShadow + 0.5 * moonShadow;
+}
+
+vec3 getColor(vec3 p, vec3 color) {
+    vec3 light_pos = vec3(0, 20, 0);
+
     vec3 direction = light_pos - p;
-    vec3 normal = sdfNormal(p);
+    vec3 normal = sceneNormal(p);
 
     float diffuseTerm = dot(normalize(normal), normalize(direction));
     diffuseTerm = clamp(diffuseTerm, 0.0, 1.0);
     float ambientTerm = 0.2;
 
     float lightIntensity = diffuseTerm + ambientTerm;
-    return clamp(vec3(color.rgb * lightIntensity), 0.0, 1.0);
+    float shadowColor = shadow(p);
+    return clamp(vec3(color.rgb * lightIntensity * shadowColor), 0.0, 1.0);
 }
 
 bool rayMarch(vec3 origin, vec3 direction, inout vec3 color) {
@@ -487,11 +518,11 @@ bool rayMarch(vec3 origin, vec3 direction, inout vec3 color) {
     float t = rayCubeIntersect(boundingBox, origin, direction);
 
     while (t < 100.0) {
-        vec3 point = vec3(rotationMatrix(vec3(0, 1, 0), PI) * vec4(origin + t * direction, 1.0));
+        vec3 point = origin + t * direction;
 
         float distance = sceneSdf(point);
         if (distance < 0.01) {
-            color = lambert(point, vec3(1, 0, 0));
+            color = getColor(point, vec3(1, 0, 0));
             return true;
         }
 
@@ -546,12 +577,10 @@ void main() {
 		vec3 point = u_Eye + waterDist * rayDir;
         vec3 normal = getWaterNormal(point.xz, waterDist);
         vec3 reflection = reflect(rayDir, normal);
-
         vec3 waterColor = vec3(0.7, 0.7, 1.0);
-
         // Find the color of the water reflection
-        vec3 scanPoint = vec3(point.x, point.y - 2.0, point.z);
-        if (!rayMarch(scanPoint, reflection, color)) {
+        vec3 feelerPoint = vec3(point.x, point.y - 2.0, point.z);
+        if (!rayMarch(feelerPoint, reflection, color)) {
             // Did not hit sceneSDF, reflects the sky
 		    vec3 farClip = point + 1000.0 * reflection;
             color = skyBox(farClip, reflection);
@@ -561,7 +590,7 @@ void main() {
         color = waterColor * color;
 
         // Adds shadow
-
+        color = clamp(color * shadow(point), 0.0, 1.0);
 	} else {
         // Draws the sky
         vec3 farClip = u_Eye + 1000.0 * rayDir;
