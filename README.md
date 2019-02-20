@@ -65,6 +65,23 @@ Water:
 
 ![](images/water.png)
 
+- There is distance fog added to the edge of the water to make the water darker and less reflective of the sky
+
+With Fog
+
+![](images/withfog.png)
+
+Without Fog
+
+![](images/withoutfog.png)
+
+Sources:
+
+![](images/source1.png)
+
+![](images/source2.png)
+
+
 Sailboat:
 - The sail boat is made using a collection of sdf union, subtraction, and intersections. 
 - The base of the boat is made by creating a large sphere, subtracting a large cylinder from sphere to leave the bottom arc portion, removing the bottom portion of the arc to look like a circle, and then subtracting the shape along a raised version of itself to make the hollow base of the boat.
