@@ -12,6 +12,8 @@ const float PI = 3.14159265359;
 const float TWO_PI = 6.28318530718;
 const float fov = 0.7853975; // = 45.0 * 3.14159 / 180.0
 
+const float epsilon = 0.01;
+
 /********************************************** Utility Functions **********************************************/
 
 vec2 sphereToUV(vec3 p) {
@@ -215,7 +217,7 @@ vec3 getDistortedNightHue(vec3 xyz, vec3 grad) {
     return ret;
 }
 
-vec3 skyBox(vec3 p, vec3 rayDir) {
+vec3 skyBox(vec3 p, vec3 rayDir, inout vec3 cloudColor) {
     vec3 ret;
 
     // Get the converted UV coordinate
@@ -256,7 +258,6 @@ vec3 skyBox(vec3 p, vec3 rayDir) {
     float angle = acos(dot(rayDir, sunDir)) * 360.0 / PI;
     float angleMoon = acos(dot(rayDir, moonDir)) * 360.0 / PI;
 
-    vec3 cloudColor;
     vec3 distortedSkyHue;
     vec3 distortedNextHue;
     if (sunDir[1] <= 0.0 && sunDir[2] >= 0.0) {
@@ -319,6 +320,18 @@ struct Cube {
     vec3 max;
 };
 
+vec3 getBrown(vec3 p) {
+    return vec3(0.3984, 0.1992, 0);
+}
+
+float subsurface(vec3 lightDir, vec3 normal, vec3 viewVec, float thickness) {
+    vec3 scatteredLightDir = lightDir + normal * 0.2;
+    float lightReachingEye = pow(clamp(dot(viewVec, -scatteredLightDir), 0.0, 1.0), 6.0) * 3.0;
+    float attenuation = 1.0;
+    float totalLight = attenuation * (lightReachingEye) * thickness;
+    return totalLight;
+}
+
 // Adapted from 460 slides
 float rayCubeIntersect(Cube c, vec3 ray_origin, vec3 ray_dir) {
     float tnear = -1000.0;
@@ -366,6 +379,10 @@ float opUnion(float d1, float d2) {
     return min(d1, d2); 
 }
 
+float opIntersection(float d1, float d2) { 
+    return max(d1,d2);
+}
+
 float sdSphere(vec3 p, float s) {
     return length(p) - s;
 }
@@ -389,24 +406,20 @@ float sdBox(vec3 p, vec3 b) {
     return length(max(d, 0.0)) + min(max(d.x, max(d.y, d.z)), 0.0);
 }
 
-float sdQuarterEllipsoid1(vec3 p, vec3 r) {
-    if (p.z < 0.0 || p.y < 0.0) {
-        return 1.0;
-    }
-    float k0 = length(p / r);
-    float k1 = length(p / (r * r));
-    float value = k0 * (k0 - 1.0) / k1;
-    return value;
+float sdSail1(vec3 p, float s) {
+    // if (p.z < 0.0 || p.y < 0.0) {
+    //     return 1.0;
+    // }
+    float val = length(p) - s;
+    return opIntersection(sdBox(p - vec3(0, 1, 1), vec3(1, 1, 1)), val);
 }
 
-float sdQuarterEllipsoid2(vec3 p, vec3 r) {
-    if (p.z > 0.0 || p.y < 0.0) {
-        return 1.0;
-    }
-    float k0 = length(p / r);
-    float k1 = length(p / (r * r));
-    float value = k0 * (k0 - 1.0) / k1;
-    return value;
+float sdSail2(vec3 p, float s) {
+    // if (p.z > 0.0 || p.y < 0.0) {
+    //     return 1.0;
+    // }
+    float val = length(p) - s;
+    return opIntersection(sdBox(p - vec3(0, 1, -1), vec3(1, 1, 1)), val);
 }
 
 float sdBoatBaseShape(vec3 p) {
@@ -434,7 +447,7 @@ float sdBoatBase(vec3 p) {
     return opSubtraction(sdBoatBaseShape(p), sdBoatBaseShape(vec3(p.x, p.y + 0.2, p.z)));
 }
 
-float sdBoatSail(vec3 p) {
+float sdBoatSail(vec3 p, inout vec3 color, bool getColor) {
     float longBase = sdVerticalCapsule(p, 10.0, 0.1);
     float shortBase = sdVerticalCapsule(p, 1.5, 0.2);
     float base = opUnion(longBase, shortBase);
@@ -445,41 +458,71 @@ float sdBoatSail(vec3 p) {
     float handleArm = sdHorizontalCapsule(handlePoint, 4.0, 0.1);
     float handle = opUnion(handleBrace, handleArm);
 
-    float sail = sdQuarterEllipsoid1(handlePoint, vec3(0.1, 8, 4));
-    sail = opUnion(sail, sdQuarterEllipsoid2(handlePoint + vec3(0, 1, 0.5), vec3(0.05, 7, 2)));
+    float woodPole = opUnion(base, handle);
+    if (getColor && woodPole < epsilon) {
+        color = getBrown(p);
+    }
 
-    return opUnion(opUnion(base, handle), sail);
+    vec3 sail1Point = vec3(handlePoint.x * 5.0, (handlePoint.y - 0.2) / 8.0, (handlePoint.z - 0.2) / 4.0);
+    float sail1 = sdSail1(sail1Point, 1.0);
+    vec3 sail2Point = vec3(handlePoint.x * 5.0, (handlePoint.y + 1.0) / 8.0, (handlePoint.z + 0.5) / 4.0);
+    float sail2 = sdSail2(sail2Point, 1.0);
+    float sail = opUnion(sail1, sail2);
+
+    if (getColor && sail < epsilon) {
+        color = vec3(5);
+    }
+
+    return opUnion(woodPole, sail);
 }
 
-float sdBoat(vec3 p) {
+float sdBoat(vec3 p, inout vec3 color, bool getColor) {
+    float boatBase = sdBoatBase(p);
+    if (getColor && boatBase < epsilon) {
+        color = getBrown(p);
+    }
     vec3 sailPoint = vec3(p.x, p.y + 0.5, p.z + 0.8);
-    return opUnion(sdBoatBase(p), sdBoatSail(sailPoint));
+    float sail = sdBoatSail(sailPoint, color, getColor);
+    return opUnion(boatBase, sail);
+}
+
+vec3 boatTransform(vec3 p) {
+    float angleZ = cos(0.05 * u_Time) * 3.0 / 180.0 * PI;
+    mat4 rotZ = rotationMatrix(vec3(0, 0, 1), angleZ);
+    vec4 point = rotationMatrix(vec3(0, 1, 0), 0.8 * PI) * vec4(p, 1.0) + vec4(0, -0.7, 0, 1);
+    return vec3(rotZ * point);
+}
+
+float sceneSdfWithColor(vec3 p, inout vec3 color, bool getColor) {
+    vec3 point = boatTransform(p);
+    return sdBoat(point, color, getColor);
 }
 
 float sceneSdf(vec3 p) {
-    vec3 point = vec3(rotationMatrix(vec3(0, 1, 0), PI) * vec4(p, 1.0)) + vec3(0, -0.7, 0);
-    return sdBoat(point);
+    vec3 point = boatTransform(p);
+    vec3 holder;
+    return sdBoat(point, holder, false);
 }
 
 vec3 sceneNormal(vec3 p) {
-    float epsilon = 0.1;
+    float dx = 0.1;
     return normalize(vec3(
-        sceneSdf(vec3(p.x + epsilon, p.y, p.z)) - sceneSdf(vec3(p.x - epsilon, p.y, p.z)),
-        sceneSdf(vec3(p.x, p.y + epsilon, p.z)) - sceneSdf(vec3(p.x, p.y - epsilon, p.z)),
-        sceneSdf(vec3(p.x, p.y, p.z + epsilon)) - sceneSdf(vec3(p.x, p.y, p.z - epsilon))
+        sceneSdf(vec3(p.x + dx, p.y, p.z)) - sceneSdf(vec3(p.x - dx, p.y, p.z)),
+        sceneSdf(vec3(p.x, p.y + dx, p.z)) - sceneSdf(vec3(p.x, p.y - dx, p.z)),
+        sceneSdf(vec3(p.x, p.y, p.z + dx)) - sceneSdf(vec3(p.x, p.y, p.z - dx))
     ));
 }
 
 float softShadow(vec3 origin, vec3 dir, float min_t, float k) {
     float res = 1.0;
     float t = min_t;
-    for(int i = 0; i < 10; ++i) {
+    for(int i = 0; i < 100; ++i) {
         float m = sceneSdf(origin + t * dir);
         if(m < 0.0001) {
             return 0.0;
         }
         res = min(res, k * m / t);
-        t += m;
+        t = t + 0.1;
     }
     return res;
 }
@@ -488,15 +531,46 @@ float shadow(vec3 p) {
     vec3 sun_dir = normalize(vec3(0.0, cos(u_Time / 175.0), sin(u_Time / 175.0)));
     vec3 sun_pos = 100.0 * sun_dir; 
     float sunShadow = clamp(softShadow(p, normalize(sun_pos - p), 0.1, 6.0), 0.0, 1.0);
+    if (sun_dir.y < -0.2) {
+        sunShadow = mix(sunShadow, 1.0, (abs(sun_dir.y) - 0.2) / 0.8);
+    }
 
     vec3 moon_dir = normalize(vec3(0.0, cos(u_Time / 175.0 + PI), sin(u_Time / 175.0 + PI)));
     vec3 moon_pos = 100.0 * moon_dir; 
     float moonShadow = clamp(softShadow(p, normalize(moon_pos - p), 0.1, 6.0), 0.0, 1.0);
+    if (moon_dir.y < 0.0) {
+        moonShadow = mix(moonShadow, 1.0, abs(moon_dir.y));
+    }
 
     return 0.5 * sunShadow + 0.5 * moonShadow;
 }
 
-vec3 getColor(vec3 p, vec3 color) {
+vec3 getSailColor(vec3 p) {
+    vec3 sailPoint = boatTransform(p);
+    vec3 normal;
+    if (sailPoint.x < 0.0) {
+        normal = boatTransform(vec3(-1, 0, 0));
+    } else {
+        normal = boatTransform(vec3(1, 0, 0));
+    }
+
+    vec3 sun_dir = normalize(vec3(0.0, cos(u_Time / 175.0), sin(u_Time / 175.0)));
+    vec3 sun_pos = 100.0 * sun_dir;
+    vec3 lightDir = normalize(sun_pos - p);
+    vec3 viewVec = normalize(u_Eye - p);
+    float thickness = 0.01;
+
+    float ss = subsurface(lightDir, normal, viewVec, thickness);
+    vec3 ssColor = 2.0 * vec3(1.0, 0.67, 0.67) * ss * vec3(1.0, 0.88, 0.7);
+
+    return clamp(vec3(0.5, 0.5, 0.5) + ssColor, 0.0, 1.0);
+}
+
+vec3 getLighting(vec3 p, vec3 color) {
+    // special case for sails 
+    if (color.y == 5.0) {
+        return getSailColor(p);
+    }
     vec3 light_pos = vec3(0, 20, 0);
 
     vec3 direction = light_pos - p;
@@ -520,9 +594,9 @@ bool rayMarch(vec3 origin, vec3 direction, inout vec3 color) {
     while (t < 100.0) {
         vec3 point = origin + t * direction;
 
-        float distance = sceneSdf(point);
-        if (distance < 0.01) {
-            color = getColor(point, vec3(1, 0, 0));
+        float distance = sceneSdfWithColor(point, color, true);
+        if (distance < epsilon) {
+            color = getLighting(point, color);
             return true;
         }
 
@@ -533,6 +607,11 @@ bool rayMarch(vec3 origin, vec3 direction, inout vec3 color) {
 }
 
 /********************************************** Start Code for Water **********************************************/
+
+vec3 applyFog(vec3 rgb, float distance, vec3 fogColor) {
+    float fogAmount = 1.0 - exp(-distance * epsilon);
+    return mix(rgb, fogColor, fogAmount);
+}
 
 // p describes the plane normal = p.xyz and intersect = p.y
 float planeIntersect(vec3 ro, vec3 rd, vec4 p){
@@ -568,7 +647,8 @@ void main() {
 	vec3 worldPoint = u_Ref + fs_Pos.x * h + fs_Pos.y * v;
 	vec3 rayDir = normalize(worldPoint - u_Eye);
 
-    vec3 color;  
+    vec3 fogColor;
+    vec3 color = vec3(1, 0, 0);  
 
     // Draw water and sky
 	float waterDist = planeIntersect(u_Eye, rayDir, vec4(0, 1, 0, 0));
@@ -578,12 +658,15 @@ void main() {
         vec3 normal = getWaterNormal(point.xz, waterDist);
         vec3 reflection = reflect(rayDir, normal);
         vec3 waterColor = vec3(0.7, 0.7, 1.0);
+
         // Find the color of the water reflection
         vec3 feelerPoint = vec3(point.x, point.y - 2.0, point.z);
         if (!rayMarch(feelerPoint, reflection, color)) {
             // Did not hit sceneSDF, reflects the sky
 		    vec3 farClip = point + 1000.0 * reflection;
-            color = skyBox(farClip, reflection);
+
+            color = skyBox(farClip, reflection, fogColor);
+            color = applyFog(color, waterDist, fogColor);
         }
 
         // Accumulates the water refleciton color 
@@ -594,7 +677,7 @@ void main() {
 	} else {
         // Draws the sky
         vec3 farClip = u_Eye + 1000.0 * rayDir;
-    	color = skyBox(farClip, rayDir);
+    	color = skyBox(farClip, rayDir, fogColor);
 	}
 
     rayMarch(u_Eye, rayDir, color); 

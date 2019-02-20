@@ -62,7 +62,7 @@ function main() {
   loadScene();
 
   //const camera = new Camera(vec3.fromValues(0, 10, -10), vec3.fromValues(0, 0, 1000));
-  const camera = new Camera(vec3.fromValues(-20, 3, -40), vec3.fromValues(-10, 0, -10));
+  const camera = new Camera(vec3.fromValues(-10, 7, -20), vec3.fromValues(-3, 5, 0));
 
   const renderer = new OpenGLRenderer(canvas);
   renderer.setClearColor(164.0 / 255.0, 233.0 / 255.0, 1.0, 1);
