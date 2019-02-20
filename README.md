@@ -53,4 +53,21 @@ Sailboat:
 - The sail of the boat is made from a union of vertical and horizonal capsules and the sails are made from scaled spheres intersected with a translated box to get a single quadrant of the sphere. The sphere is then scaled up to make the elliptical shape of the sail.
 - The color of the boat is created with flattening 3d fbm by rising the x height of the point sampled, multiplying the result by 10 and then taking the fract of the result. This allows rings to be created from the height field and I interpolated the color of the boat using the fbm noise on a light and dark wood grain color.
 - The ripples on the sail of the ship are created similar to the water normals. I offset the normals along the y direction using fbm like the water normal method. I then added subsurface scattering to the sails to make the ripples noticeable as the ship sways over time.
-- The sail also has subsurface scattering with the sun and the moon lights. The sails scatter a more red and orange color during the sunset and has a bluer hue during the moon setting phase when the run and moon are behind the sale in the scene. 
+
+Sail during the day:
+
+![](images/sailday.png)
+
+Sail during the night:
+
+![](images/sailnight.png)
+
+- The sail also has subsurface scattering with the sun and the moon lights. The sails scatter a more red and orange color during the sunset and has a bluer hue during the moon setting phase when the sun and moon are behind the sail in the scene. 
+
+Sail during sunset, has orange and red color from subsurfacing scattering:
+
+![](images/sailsunset.png)
+
+Sail during moon setting, has blue color from subsurfacing scattering:
+
+![](images/sailmoonset.png)
