@@ -40,10 +40,29 @@ Skybox:
 - The sun and the moon represent an angle in the sky and the color of the sun and moon fades out with the sky in the background using linear interpolation like a halo.
 - In addition, the night sky has fbm placed stars in the sky
 
+Sunset
+
+![](images/sunset.png)
+
+Night
+
+![](images/night.png)
+
+Moonset/Sunrise
+
+![](images/moonset.png)
+
+Day
+
+![](images/day.png)
+
 Water:
 - The water is a plane along the y = 0 axis. 
 - The water is perfectly specular reflective and reflect colors along the normal of the water
 - The normal of the water is calculated by randomly offsetting the plane's (0, 1, 0) normal vector using 3d FBM on (x, z, time) where x and z are points on the plane and time is the time of day. Using the fbm, we offset the x and y portions of the normal by a small amount and then normalizing the result to create the water normal
+
+![](images/water.png)
+
 - The shadows on the water are penumbra shadows from the sun and moon as the rotate in the sky. 
 - The final color of the water is calculated by (blue water color) * (reflective color of boat sdf and skybox) * (penumbra shadow from boat)
 
@@ -52,6 +71,9 @@ Sailboat:
 - The base of the boat is made by creating a large sphere, subtracting a large cylinder from sphere to leave the bottom arc portion, removing the bottom portion of the arc to look like a circle, and then subtracting the shape along a raised version of itself to make the hollow base of the boat.
 - The sail of the boat is made from a union of vertical and horizonal capsules and the sails are made from scaled spheres intersected with a translated box to get a single quadrant of the sphere. The sphere is then scaled up to make the elliptical shape of the sail.
 - The color of the boat is created with flattening 3d fbm by rising the x height of the point sampled, multiplying the result by 10 and then taking the fract of the result. This allows rings to be created from the height field and I interpolated the color of the boat using the fbm noise on a light and dark wood grain color.
+
+![](images/wood.png)
+
 - The ripples on the sail of the ship are created similar to the water normals. I offset the normals along the y direction using fbm like the water normal method. I then added subsurface scattering to the sails to make the ripples noticeable as the ship sways over time.
 
 Sail during the day:
