@@ -313,6 +313,35 @@ vec3 skyBox(vec3 p, vec3 rayDir, inout vec3 cloudColor) {
     return ret;
 }
 
+/********************************************** Start Code for Water **********************************************/
+
+vec3 applyFog(vec3 rgb, float distance, vec3 fogColor) {
+    float fogAmount = 1.0 - exp(-distance * epsilon);
+    return mix(rgb, fogColor, fogAmount);
+}
+
+// p describes the plane normal = p.xyz and intersect = p.w
+float planeIntersect(vec3 ro, vec3 rd, vec4 p){
+    return -(dot(ro, p.xyz) + p.w) / dot(rd, p.xyz);
+}
+
+float waterFbm(vec2 p) {
+    return 0.1 * abs(fbm3(vec3(p, 0.001 * u_Time)) - 0.5);
+}
+
+vec3 getWaterNormal(vec2 p, float distToWater, vec3 n) {
+    // make water less noise the futher away it is
+    float offset = -10.0 * (1.0 - smoothstep(0.0, 100.0, distToWater));
+    vec2 dx = vec2(0.1, 0.0);
+    vec2 dz = vec2(0.0, 0.1);
+    vec2 point = p / 5.0;
+
+    vec3 normal = n;
+    normal.x = offset * (waterFbm(point + dx) - waterFbm(point - dx));
+    normal.z = offset * (waterFbm(point + dz) - waterFbm(point - dz));
+    return normalize(normal);
+}
+
 /********************************************** Start Code for SDFs **********************************************/
 
 struct Cube {
@@ -320,8 +349,11 @@ struct Cube {
     vec3 max;
 };
 
-vec3 getBrown(vec3 p) {
-    return vec3(0.3984, 0.1992, 0);
+vec3 getWoodColor(vec3 p) {
+    vec3 darkGrain = vec3(0.40, 0.19, 0);
+    vec3 lightGrain = vec3(0.72, 0.39, 0.22);
+    float fbm = fract(fbm3(p / 5.0) * 10.0);
+    return mix(darkGrain, lightGrain, fbm);
 }
 
 float subsurface(vec3 lightDir, vec3 normal, vec3 viewVec, float thickness) {
@@ -460,12 +492,12 @@ float sdBoatSail(vec3 p, inout vec3 color, bool getColor) {
 
     float woodPole = opUnion(base, handle);
     if (getColor && woodPole < epsilon) {
-        color = getBrown(p);
+        color = getWoodColor(p);
     }
 
     vec3 sail1Point = vec3(handlePoint.x * 5.0, (handlePoint.y - 0.2) / 8.0, (handlePoint.z - 0.2) / 4.0);
     float sail1 = sdSail1(sail1Point, 1.0);
-    vec3 sail2Point = vec3(handlePoint.x * 5.0, (handlePoint.y + 1.0) / 8.0, (handlePoint.z + 0.5) / 4.0);
+    vec3 sail2Point = vec3(handlePoint.x * 5.0, (handlePoint.y + 1.0) / 7.0, (handlePoint.z + 0.5) / 2.0);
     float sail2 = sdSail2(sail2Point, 1.0);
     float sail = opUnion(sail1, sail2);
 
@@ -479,7 +511,7 @@ float sdBoatSail(vec3 p, inout vec3 color, bool getColor) {
 float sdBoat(vec3 p, inout vec3 color, bool getColor) {
     float boatBase = sdBoatBase(p);
     if (getColor && boatBase < epsilon) {
-        color = getBrown(p);
+        color = getWoodColor(p);
     }
     vec3 sailPoint = vec3(p.x, p.y + 0.5, p.z + 0.8);
     float sail = sdBoatSail(sailPoint, color, getColor);
@@ -503,6 +535,15 @@ float sceneSdf(vec3 p) {
     vec3 holder;
     return sdBoat(point, holder, false);
 }
+
+// float fiveTapAO(vec3 p, vec3 n) {
+//     float aoSum = 0.0;
+//     for(float i = 0.0; i < 5.0; ++i) {
+//         float coeff = 1.0 / pow(2.0, i);
+//         aoSum += coeff * (i * 0.5 - sceneSdf(p + n * i *  0.5));
+//     }
+//     return 1.0 - 2.0 * aoSum;
+// }
 
 vec3 sceneNormal(vec3 p) {
     float dx = 0.1;
@@ -558,12 +599,13 @@ vec3 getSailColor(vec3 p) {
     vec3 sun_pos = 100.0 * sun_dir;
     vec3 lightDir = normalize(sun_pos - p);
     vec3 viewVec = normalize(u_Eye - p);
-    float thickness = 0.01;
+    float thickness = 0.1;
 
     float ss = subsurface(lightDir, normal, viewVec, thickness);
     vec3 ssColor = 2.0 * vec3(1.0, 0.67, 0.67) * ss * vec3(1.0, 0.88, 0.7);
+    vec3 color = clamp(vec3(0.5, 0.5, 0.5) + ssColor, 0.0, 1.0);
 
-    return clamp(vec3(0.5, 0.5, 0.5) + ssColor, 0.0, 1.0);
+    return color;
 }
 
 vec3 getLighting(vec3 p, vec3 color) {
@@ -582,7 +624,7 @@ vec3 getLighting(vec3 p, vec3 color) {
 
     float lightIntensity = diffuseTerm + ambientTerm;
     float shadowColor = shadow(p);
-    return clamp(vec3(color.rgb * lightIntensity * shadowColor), 0.0, 1.0);
+    return clamp(color.rgb * lightIntensity * shadowColor, 0.0, 1.0);
 }
 
 bool rayMarch(vec3 origin, vec3 direction, inout vec3 color) {
@@ -606,35 +648,6 @@ bool rayMarch(vec3 origin, vec3 direction, inout vec3 color) {
     return false;
 }
 
-/********************************************** Start Code for Water **********************************************/
-
-vec3 applyFog(vec3 rgb, float distance, vec3 fogColor) {
-    float fogAmount = 1.0 - exp(-distance * epsilon);
-    return mix(rgb, fogColor, fogAmount);
-}
-
-// p describes the plane normal = p.xyz and intersect = p.y
-float planeIntersect(vec3 ro, vec3 rd, vec4 p){
-    return -(dot(ro, p.xyz) + p.w) / dot(rd, p.xyz);
-}
-
-float waterFbm(vec2 p) {
-	return 0.1 * abs(fbm3(vec3(p, 0.001 * u_Time)) - 0.5);
-}
-
-vec3 getWaterNormal(vec2 p, float distToWater) {
-	// make water less noise the futher away it is
-	float offset = -10.0 * (1.0 - smoothstep(0.0, 100.0, distToWater));
-	vec2 dx = vec2(0.1, 0.0);
-	vec2 dz = vec2(0.0, 0.1);
-	vec2 point = p / 5.0;
-
-	vec3 normal = vec3(0.0, 1.0, 0.0);
-	normal.x = offset * (waterFbm(point + dx) - waterFbm(point - dx));
-	normal.z = offset * (waterFbm(point + dz) - waterFbm(point - dz));
-	return normalize(normal);
-}
-
 /********************************************** Start Code for Main **********************************************/
 
 void main() {
@@ -655,7 +668,7 @@ void main() {
 	if (waterDist > 0.0) {
         // Draws the water
 		vec3 point = u_Eye + waterDist * rayDir;
-        vec3 normal = getWaterNormal(point.xz, waterDist);
+        vec3 normal = getWaterNormal(point.xz, waterDist, vec3(0, 1, 0));
         vec3 reflection = reflect(rayDir, normal);
         vec3 waterColor = vec3(0.7, 0.7, 1.0);
 
