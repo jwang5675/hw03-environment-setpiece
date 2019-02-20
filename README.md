@@ -92,3 +92,6 @@ Sail during sunset, has orange and red color from subsurfacing scattering:
 Sail during moon setting, has blue color from subsurfacing scattering:
 
 ![](images/sailmoonset.png)
+
+## Extra Credit
+- Class Critique
