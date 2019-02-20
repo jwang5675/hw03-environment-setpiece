@@ -573,27 +573,43 @@ float shadow(vec3 p) {
     vec3 sun_pos = 100.0 * sun_dir; 
     float sunShadow = clamp(softShadow(p, normalize(sun_pos - p), 0.1, 6.0), 0.0, 1.0);
     if (sun_dir.y < -0.2) {
-        sunShadow = mix(sunShadow, 1.0, (abs(sun_dir.y) - 0.2) / 0.8);
+        sunShadow = mix(sunShadow, 1.0, abs(sun_dir.y + 0.2) / 0.8);
     }
 
     vec3 moon_dir = normalize(vec3(0.0, cos(u_Time / 175.0 + PI), sin(u_Time / 175.0 + PI)));
     vec3 moon_pos = 100.0 * moon_dir; 
     float moonShadow = clamp(softShadow(p, normalize(moon_pos - p), 0.1, 6.0), 0.0, 1.0);
-    if (moon_dir.y < 0.0) {
-        moonShadow = mix(moonShadow, 1.0, abs(moon_dir.y));
+    if (moon_dir.y < 0.2) {
+        moonShadow = mix(moonShadow, 1.0, abs(moon_dir.y - 0.2) / 1.2);
     }
 
     return 0.5 * sunShadow + 0.5 * moonShadow;
+}
+
+vec3 getSailRipple(vec2 p, float distToWater, vec3 n) {
+    // make water less noise the futher away it is
+    float offset = -10.0;
+    vec2 dy = vec2(0.1, 0.0);
+    vec2 dz = vec2(0.0, 0.1);
+    vec2 point = p;
+
+    vec3 normal = n;
+    normal.y = offset * (waterFbm(point + dy) - waterFbm(point - dy));
+    normal.z = offset * (waterFbm(point + dz) - waterFbm(point - dz));
+    return normalize(normal);
 }
 
 vec3 getSailColor(vec3 p) {
     vec3 sailPoint = boatTransform(p);
     vec3 normal;
     if (sailPoint.x < 0.0) {
-        normal = boatTransform(vec3(-1, 0, 0));
+        normal = getSailRipple(p.xz, 1.0, vec3(-1, 0, 0));
+        normal = boatTransform(normal);
     } else {
-        normal = boatTransform(vec3(1, 0, 0));
+        normal = getSailRipple(p.xz, 1.0, vec3(1, 0, 0));
+        normal = boatTransform(normal);
     }
+    normal = normalize(normal);
 
     vec3 sun_dir = normalize(vec3(0.0, cos(u_Time / 175.0), sin(u_Time / 175.0)));
     vec3 sun_pos = 100.0 * sun_dir;
@@ -601,9 +617,27 @@ vec3 getSailColor(vec3 p) {
     vec3 viewVec = normalize(u_Eye - p);
     float thickness = 0.1;
 
-    float ss = subsurface(lightDir, normal, viewVec, thickness);
-    vec3 ssColor = 2.0 * vec3(1.0, 0.67, 0.67) * ss * vec3(1.0, 0.88, 0.7);
-    vec3 color = clamp(vec3(0.5, 0.5, 0.5) + ssColor, 0.0, 1.0);
+    float sunSub = subsurface(lightDir, normal, viewVec, thickness);
+    vec3 sunSubColor = 3.0 * vec3(1.0, 0.67, 0.67) * sunSub * vec3(1.0, 0.88, 0.7);
+
+    vec3 moon_dir = normalize(vec3(0.0, cos(u_Time / 175.0 + PI), sin(u_Time / 175.0 + PI)));
+    vec3 moon_pos = 100.0 * moon_dir; 
+    lightDir = normalize(moon_pos - p);
+    float moonSub = subsurface(lightDir, normal, viewVec, thickness);
+    vec3 moonSubColor = 2.0 * vec3(0.67, 0.67, 1.0) * moonSub * vec3(0.7, 0.88, 1.0);
+
+    vec3 light_pos = vec3(5, 5, 10);
+    vec3 direction = normalize(light_pos - p);
+    vec3 naturalSub = 0.1 * vec3(subsurface(direction, normal, viewVec, thickness));
+
+    vec3 color = clamp(vec3(0.4, 0.4, 0.4) + sunSubColor + moonSubColor + naturalSub, 0.0, 1.0);
+
+    light_pos = vec3(4, 20, 4);
+    float diffuseTerm = dot(normalize(normal), normalize(direction));
+    diffuseTerm = clamp(diffuseTerm, 0.0, 1.0);
+    float ambientTerm = mix(0.5, 1.0, sun_dir.y / 2.0 + 0.5);
+    float lightIntensity = diffuseTerm + ambientTerm;
+    color = clamp(lightIntensity * color, 0.0, 1.0);
 
     return color;
 }
@@ -613,7 +647,7 @@ vec3 getLighting(vec3 p, vec3 color) {
     if (color.y == 5.0) {
         return getSailColor(p);
     }
-    vec3 light_pos = vec3(0, 20, 0);
+    vec3 light_pos = vec3(4, 20, 4);
 
     vec3 direction = light_pos - p;
     vec3 normal = sceneNormal(p);
