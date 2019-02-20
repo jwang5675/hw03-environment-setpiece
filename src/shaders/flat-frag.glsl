@@ -111,8 +111,8 @@ const vec3 sunset[5] = vec3[](vec3(255, 229, 119) / 255.0,
                               vec3(255, 137, 103) / 255.0,
                               vec3(253, 96, 81) / 255.0,
                               vec3(57, 32, 51) / 255.0);
-// Dusk palette
-const vec3 dusk[5] = vec3[](vec3(144, 96, 144) / 255.0,
+// Sunrise palette
+const vec3 sunrise[5] = vec3[](vec3(144, 96, 144) / 255.0,
                             vec3(96, 72, 120) / 255.0,
                             vec3(72, 48, 120) / 255.0,
                             vec3(48, 24, 96) / 255.0,
@@ -152,19 +152,19 @@ vec3 xyzToSunset(vec3 xyz) {
     return sunset[4];
 }
 
-vec3 xyzToDusk(vec3 xyz) {
+vec3 xyzToSunrise(vec3 xyz) {
     if(xyz.y < 0.5) {
-        return dusk[0];
+        return sunrise[0];
     } else if(xyz.y < 0.55) {
-        return mix(dusk[0], dusk[1], (xyz.y - 0.5) / 0.05);
+        return mix(sunrise[0], sunrise[1], (xyz.y - 0.5) / 0.05);
     } else if(xyz.y < 0.6) {
-        return mix(dusk[1], dusk[2], (xyz.y - 0.55) / 0.05);
+        return mix(sunrise[1], sunrise[2], (xyz.y - 0.55) / 0.05);
     } else if(xyz.y < 0.65) {
-        return mix(dusk[2], dusk[3], (xyz.y - 0.6) / 0.05);
+        return mix(sunrise[2], sunrise[3], (xyz.y - 0.6) / 0.05);
     } else if(xyz.y < 0.75) {
-        return mix(dusk[3], dusk[4], (xyz.y - 0.65) / 0.1);
+        return mix(sunrise[3], sunrise[4], (xyz.y - 0.65) / 0.1);
     }
-    return dusk[4];
+    return sunrise[4];
 }
 
 vec3 xyzToDay(vec3 xyz) {
@@ -235,7 +235,7 @@ vec3 skyBox(vec3 p, vec3 rayDir, inout vec3 cloudColor) {
                              fbm3(xyzT2 + vec3(0.0, 0.0, 1.0 / u_Dimensions.x)) - fbm3(xyzT2 - vec3(0.0, 0.0, 1.0 / u_Dimensions.x)));
 
     vec3 distortedSunsetHue = xyzToSunset(xyz + grad3D);
-    vec3 distortedDuskHue = xyzToDusk(xyz + grad3D);
+    vec3 distortedSunriseHue = xyzToSunrise(xyz + grad3D);
     vec3 distortedDayHue = xyzToDay(xyz + grad3D);
     vec3 distortedNightHue = getDistortedNightHue(xyz, grad3D);
 
@@ -247,7 +247,7 @@ vec3 skyBox(vec3 p, vec3 rayDir, inout vec3 cloudColor) {
             float starBrightnessG = multiple * (mix(distortedNightHue[1] + 0.4, 1.0, (uv.y - 0.5) / 0.2));
             float starBrightnessB = multiple * (mix(distortedNightHue[2] + 0.4, 1.0, (uv.y - 0.5) / 0.2));
             distortedNightHue = vec3(starBrightnessR + 0.4, starBrightnessG + 0.2, starBrightnessB + 0.2);
-            distortedDuskHue = distortedNightHue * 0.8;
+            distortedSunriseHue = distortedNightHue * 0.8;
         }
     }
 
@@ -264,16 +264,16 @@ vec3 skyBox(vec3 p, vec3 rayDir, inout vec3 cloudColor) {
         // Sunset to night
         cloudColor = mix(sunset[3], night[4], abs(cos(u_Time / 175.0)));
         distortedSkyHue = mix(distortedSunsetHue, distortedNightHue, abs(cos(u_Time / 175.0)));
-        distortedNextHue = mix(distortedNightHue, distortedDuskHue, abs(cos(u_Time / 175.0)));
+        distortedNextHue = mix(distortedNightHue, distortedSunriseHue, abs(cos(u_Time / 175.0)));
     } else if (sunDir[1] <= 0.0 && sunDir[2] <= 0.0) {
         // Night to sunrise
-        cloudColor = mix(night[4], dusk[3], 1.0 - abs(cos(u_Time / 175.0)));
-        distortedSkyHue = mix(distortedNightHue, distortedDuskHue, 1.0 - abs(cos(u_Time / 175.0)));
-        distortedNextHue = mix(distortedDuskHue, distortedDayHue, 1.0 - abs(cos(u_Time / 175.0)));
+        cloudColor = mix(night[4], sunrise[3], 1.0 - abs(cos(u_Time / 175.0)));
+        distortedSkyHue = mix(distortedNightHue, distortedSunriseHue, 1.0 - abs(cos(u_Time / 175.0)));
+        distortedNextHue = mix(distortedSunriseHue, distortedDayHue, 1.0 - abs(cos(u_Time / 175.0)));
     } else if (sunDir[1] >= 0.0 && sunDir[2] <= 0.0) {
         // Sunrise to day
-        cloudColor = mix(dusk[3], day[4], abs(cos(u_Time / 175.0)));
-        distortedSkyHue = mix(distortedDuskHue, distortedDayHue, abs(cos(u_Time / 175.0)));
+        cloudColor = mix(sunrise[3], day[4], abs(cos(u_Time / 175.0)));
+        distortedSkyHue = mix(distortedSunriseHue, distortedDayHue, abs(cos(u_Time / 175.0)));
         distortedNextHue = mix(distortedDayHue, distortedSunsetHue, abs(cos(u_Time / 175.0)));
     } else {
         // Day to sunset
