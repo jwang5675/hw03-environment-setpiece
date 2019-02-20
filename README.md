@@ -60,11 +60,10 @@ Water:
 - The water is a plane along the y = 0 axis. 
 - The water is perfectly specular reflective and reflect colors along the normal of the water
 - The normal of the water is calculated by randomly offsetting the plane's (0, 1, 0) normal vector using 3d FBM on (x, z, time) where x and z are points on the plane and time is the time of day. Using the fbm, we offset the x and y portions of the normal by a small amount and then normalizing the result to create the water normal
-
-![](images/water.png)
-
 - The shadows on the water are penumbra shadows from the sun and moon as the rotate in the sky. 
 - The final color of the water is calculated by (blue water color) * (reflective color of boat sdf and skybox) * (penumbra shadow from boat)
+
+![](images/water.png)
 
 Sailboat:
 - The sail boat is made using a collection of sdf union, subtraction, and intersections. 
