@@ -65,7 +65,7 @@ Water:
 
 ![](images/water.png)
 
-- There is distance fog added to the edge of the water to make the water darker and less reflective of the sky
+- There is distance fog added to the edge of the water to make the water darker and less reflective of the sky. This is mainly used to prevent the water near the horizon from being way too reflective and looking like a mirror.
 
 With Fog
 
